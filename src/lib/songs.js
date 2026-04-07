@@ -115,7 +115,39 @@ function _refrao2(s) {
   ];
 }
 
+// ── Demo — Figuras Musicais ─────────────────────────────────────────────────
+// 7 compassos de 4/4: semibreve, mínima, semínima, colcheia,
+// semicolcheia, fusa e semifusa. Tom de concerto (Dó maior).
+function _demoFiguras() {
+  const sc = ["C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5"];
+  const notes = [];
+  // Compasso 1: 1 semibreve (4 tempos)
+  notes.push(["C4", 0, 4]);
+  // Compasso 2: 2 mínimas (2 tempos cada)
+  notes.push(["C4", 4, 2], ["G4", 6, 2]);
+  // Compasso 3: 4 semínimas (1 tempo cada)
+  for (let i = 0; i < 4; i++) notes.push([sc[i], 8 + i, 1]);
+  // Compasso 4: 8 colcheias (0,5 tempo cada)
+  for (let i = 0; i < 8; i++) notes.push([sc[i], 12 + i * 0.5, 0.5]);
+  // Compasso 5: 16 semicolcheias (0,25 tempo cada) — sobe e desce a escala
+  const s5 = [...sc, ...sc.slice().reverse()];
+  for (let i = 0; i < 16; i++) notes.push([s5[i], 16 + i * 0.25, 0.25]);
+  // Compasso 6: 32 fusas (0,125 tempo cada)
+  for (let i = 0; i < 32; i++) notes.push([sc[i % 8], 20 + i * 0.125, 0.125]);
+  // Compasso 7: 64 semifusas (0,0625 tempo cada)
+  for (let i = 0; i < 64; i++) notes.push([sc[i % 8], 24 + i * 0.0625, 0.0625]);
+  return notes;
+}
+
 const SONGS = [
+  {
+    id: "demo_figuras",
+    title: "Demo — Figuras Musicais",
+    author: "SaxHero",
+    difficulty: 1,
+    bpm: 60,
+    notes: beats(_demoFiguras(), 60),
+  },
   {
     // A introdução do MP3 dura ~26s → sax entra no beat 28.2 (26 × 65/60).
     // Estrutura: [Verso×4 + Refrão×2] × 2  (páginas esquerda e direita da partitura)

@@ -76,7 +76,11 @@ export function staffNoteY(noteName, staffTopY, ls) {
 // a classificação do tipo de nota, agrupamento de colcheias e cálculo de pausas.
 function snapToMusical(beats) {
   // Durações padrão em tempos (semínima = 1 tempo)
-  const VALUES = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0];
+  // Inclui subfiguras curtas: semifusa (0,0625), fusa (0,125) e suas versões pontuadas
+  const VALUES = [
+    0.0625, 0.09375, 0.125, 0.1875, 0.25, 0.375, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0,
+    4.0,
+  ];
   const TOLERANCE = 0.07; // ±70 ms a 60 BPM — tolerância segura sem mascarar erros reais
   let best = beats,
     bestDist = Infinity;
@@ -301,8 +305,8 @@ export class GameEngine {
     };
 
     for (const note of sorted) {
-      // Colcheias (0,5) e semicolcheias (0,25) podem ser agrupadas.
-      // Usa <= 0,52 em vez de <= 0,5 como margem de segurança para ponto flutuante.
+      // Colcheias (0,5), semicolcheias (0,25), fusas (0,125) e semifusas (0,0625) podem ser agrupadas.
+      // Usa <= 0,52 como margem de segurança; subfiguras menores já são cobertas pois são < 0,52.
       if (note.durationBeats <= 0.52) {
         if (cur.length === 0) {
           cur.push(note);
@@ -908,9 +912,12 @@ export class GameEngine {
     // Com valores arredondados as tolerâncias são generosas de propósito —
     // tornam o renderizador resistente mesmo se o caller pular o snap.
     const hasDot =
-      Math.abs(dur - 3.0) < 0.13 || // dotted half
-      Math.abs(dur - 1.5) < 0.13 || // dotted quarter
-      Math.abs(dur - 0.75) < 0.13; // dotted eighth
+      Math.abs(dur - 3.0) < 0.13 || // mínima pontuada      (2  × 1,5)
+      Math.abs(dur - 1.5) < 0.13 || // semínima pontuada    (1  × 1,5)
+      Math.abs(dur - 0.75) < 0.08 || // colcheia pontuada    (0,5 × 1,5)
+      Math.abs(dur - 0.375) < 0.05 || // semicolcheia pontuada(0,25 × 1,5)
+      Math.abs(dur - 0.1875) < 0.03 || // fusa pontuada        (0,125 × 1,5)
+      Math.abs(dur - 0.09375) < 0.02; // semifusa pontuada    (0,0625 × 1,5)
 
     // baseDur é o equivalente sem ponto (2, 1 ou 0,5 respectivamente)
     const baseDur = hasDot ? dur / 1.5 : dur;
@@ -920,7 +927,17 @@ export class GameEngine {
     // isQuarter: tudo entre mínima e colcheia
     const isQuarter = !isWhole && !isHalf && baseDur >= 1.0 - 0.13;
     const isEighth = !isWhole && !isHalf && !isQuarter && baseDur >= 0.5 - 0.13;
-    const isSixteenth = !isWhole && !isHalf && !isQuarter && !isEighth; // 0.25
+    const isSixteenth =
+      !isWhole && !isHalf && !isQuarter && !isEighth && baseDur >= 0.25 - 0.06; // semicolcheia
+    const isFusa =
+      !isWhole &&
+      !isHalf &&
+      !isQuarter &&
+      !isEighth &&
+      !isSixteenth &&
+      baseDur >= 0.125 - 0.04; // fusa
+    const isSemifusa =
+      !isWhole && !isHalf && !isQuarter && !isEighth && !isSixteenth && !isFusa; // semifusa
     // Cabeças abertas para semibreve e mínima (incluindo mínima pontuada)
     const isFilled = !isWhole && !isHalf;
 
@@ -998,7 +1015,15 @@ export class GameEngine {
       ctx.stroke();
       ctx.restore();
 
-      const flags = isSixteenth ? 2 : isEighth ? 1 : 0;
+      const flags = isSemifusa
+        ? 4
+        : isFusa
+          ? 3
+          : isSixteenth
+            ? 2
+            : isEighth
+              ? 1
+              : 0;
       if (flags > 0)
         this._drawFlags(ctx, stemX, stemEndY, stemUp, flags, ls, color);
     }
@@ -1156,7 +1181,7 @@ export class GameEngine {
     // Ligadura primária do primeiro ao último stem do grupo
     fillBeam(x0, xN, 0);
 
-    // Ligadura secundária para pares de semicolcheias (paralela, deslocada por BEAM_H + BEAM_G)
+    // Ligadura secundária para pares de semicolcheias (≤ 0,26 tempos)
     const off2 = beamUp ? -(BEAM_H + BEAM_G) : BEAM_H + BEAM_G;
     for (let i = 0; i < nd.length - 1; i++) {
       if (
@@ -1164,6 +1189,28 @@ export class GameEngine {
         nd[i + 1].note.durationBeats <= 0.26
       ) {
         fillBeam(stemXof(nd[i]), stemXof(nd[i + 1]), off2);
+      }
+    }
+
+    // Ligadura terciária para pares de fusas (≤ 0,13 tempos)
+    const off3 = beamUp ? -(2 * (BEAM_H + BEAM_G)) : 2 * (BEAM_H + BEAM_G);
+    for (let i = 0; i < nd.length - 1; i++) {
+      if (
+        nd[i].note.durationBeats <= 0.13 &&
+        nd[i + 1].note.durationBeats <= 0.13
+      ) {
+        fillBeam(stemXof(nd[i]), stemXof(nd[i + 1]), off3);
+      }
+    }
+
+    // Ligadura quaternária para pares de semifusas (≤ 0,07 tempos)
+    const off4 = beamUp ? -(3 * (BEAM_H + BEAM_G)) : 3 * (BEAM_H + BEAM_G);
+    for (let i = 0; i < nd.length - 1; i++) {
+      if (
+        nd[i].note.durationBeats <= 0.07 &&
+        nd[i + 1].note.durationBeats <= 0.07
+      ) {
+        fillBeam(stemXof(nd[i]), stemXof(nd[i + 1]), off4);
       }
     }
   }
@@ -1174,11 +1221,14 @@ export class GameEngine {
     // antes que o snap tenha propagado (ex.: no primeiro frame de renderização).
     const dur = snapToMusical(durRaw);
 
-    // Detecta pausas pontuadas (3 = mínima pontuada, 1.5 = semínima pontuada, 0.75 = colcheia pontuada)
+    // Detecta pausas pontuadas em todas as figuras
     const isDotted =
-      Math.abs(dur - 3.0) < 0.13 ||
-      Math.abs(dur - 1.5) < 0.13 ||
-      Math.abs(dur - 0.75) < 0.13;
+      Math.abs(dur - 3.0) < 0.13 || // mínima pontuada
+      Math.abs(dur - 1.5) < 0.13 || // semínima pontuada
+      Math.abs(dur - 0.75) < 0.08 || // colcheia pontuada
+      Math.abs(dur - 0.375) < 0.05 || // semicolcheia pontuada
+      Math.abs(dur - 0.1875) < 0.03 || // fusa pontuada
+      Math.abs(dur - 0.09375) < 0.02; // semifusa pontuada
     const baseDur = isDotted ? dur / 1.5 : dur;
 
     ctx.save();
@@ -1199,11 +1249,23 @@ export class GameEngine {
     } else if (baseDur >= 1 - 0.13) {
       this._drawQuarterRest(ctx, x, staffTopY + ls * 2, ls);
     } else if (baseDur >= 0.5 - 0.13) {
+      // Pausa de colcheia
       this._drawEighthRest(ctx, x, staffTopY + ls * 2, ls);
-    } else {
-      // Sixteenth rest: two eighth-rest symbols staggered vertically
+    } else if (baseDur >= 0.25 - 0.06) {
+      // Pausa de semicolcheia: dois símbolos de colcheia escalonados
       this._drawEighthRest(ctx, x, staffTopY + ls * 1.5, ls);
       this._drawEighthRest(ctx, x + ls * 0.3, staffTopY + ls * 2.5, ls);
+    } else if (baseDur >= 0.125 - 0.04) {
+      // Pausa de fusa: três símbolos de colcheia escalonados
+      this._drawEighthRest(ctx, x, staffTopY + ls * 1.0, ls);
+      this._drawEighthRest(ctx, x + ls * 0.3, staffTopY + ls * 2.0, ls);
+      this._drawEighthRest(ctx, x, staffTopY + ls * 3.0, ls);
+    } else {
+      // Pausa de semifusa: quatro símbolos de colcheia escalonados
+      this._drawEighthRest(ctx, x, staffTopY + ls * 0.5, ls);
+      this._drawEighthRest(ctx, x + ls * 0.3, staffTopY + ls * 1.5, ls);
+      this._drawEighthRest(ctx, x, staffTopY + ls * 2.5, ls);
+      this._drawEighthRest(ctx, x + ls * 0.3, staffTopY + ls * 3.0, ls);
     }
 
     // Ponto de aumento para pausas pontuadas — colocado no terceiro espaço de baixo
