@@ -1,0 +1,38 @@
+TITULO:      Parabéns pra Você
+AUTOR:       Tradicional
+ID:          parabens_pra_voce
+BPM:         100
+COMPASSO:    3/4
+SAX:         alto
+DIFICULDADE: 1
+
+# ── Verso 1 ──────────────────────────────────────────────────────────────────
+
+# Compasso 1 — anacruse "Pa-ra-" (dois últimos tempos do compasso inicial)
+---:s  Sol4:c  Sol4:c
+
+# Compasso 2 — "béns pra vo-" → La Sol | Do
+La4:s  Sol4:s  Do5:s
+
+# Compasso 3 — "-cê" (mínima) + anacruse "Pa-"
+Si4:m  Sol4:s
+
+# Compasso 4 — "ra-béns pra vo-"
+Sol4:c  Sol4:c  La4:s  Sol4:s
+
+# Compasso 5 — "-cê" (mínima) + anacruse "pa-"
+Re5:m  Sol4:s
+
+# ── Verso 2 ──────────────────────────────────────────────────────────────────
+
+# Compasso 6 — "ra-béns pra vo-"
+Sol4:c  Sol4:c  Sol5:s  Mi5:s
+
+# Compasso 7 — "-cê" (mínima) + anacruse "pa-"
+Do5:m  Si4:s
+
+# Compasso 8 — "ra-béns pra vo-"
+Si4:c  Si4:c  La4:s  La4:s
+
+# Compasso 9 — "-cê" completo
+Fa#5:m.

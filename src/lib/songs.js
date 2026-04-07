@@ -6,12 +6,13 @@
 import { demoFiguras } from "./songs/demo_figuras.js";
 import { demo34 } from "./songs/demo_tres_quartos.js";
 import { aEleAGloria } from "./songs/a_ele_a_gloria.js";
+import { parabensPraVoce } from "./songs/parabens_pra_voce.js";
 
 // Re-exporta beats() para que código legado continue funcionando
 export { beats } from "./songs/utils.js";
 
 // ── Catálogo estático ────────────────────────────────────────────────────────
-const SONGS = [demoFiguras, demo34, aEleAGloria];
+const SONGS = [demoFiguras, demo34, parabensPraVoce, aEleAGloria];
 
 // ── Músicas importadas (persistidas em localStorage) ─────────────────────────
 function getAllSongs() {

@@ -9,12 +9,12 @@
 
 export default class PitchDetector {
   constructor() {
-    this.audioCtx     = null;
-    this.analyser     = null;
-    this.buffer       = null;
-    this.stream       = null;
-    this.isRunning    = false;
-    this.animFrameId  = null;
+    this.audioCtx = null;
+    this.analyser = null;
+    this.buffer = null;
+    this.stream = null;
+    this.isRunning = false;
+    this.animFrameId = null;
 
     /** Chamado com (frequência, noteInfo) quando um pitch é detectado */
     this.onPitch = null;
@@ -27,21 +27,21 @@ export default class PitchDetector {
   async init() {
     try {
       this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      this.stream   = await navigator.mediaDevices.getUserMedia({
+      this.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: false,
           noiseSuppression: false,
-          autoGainControl:  false,
-        }
+          autoGainControl: false,
+        },
       });
-      const source   = this.audioCtx.createMediaStreamSource(this.stream);
-      this.analyser  = this.audioCtx.createAnalyser();
+      const source = this.audioCtx.createMediaStreamSource(this.stream);
+      this.analyser = this.audioCtx.createAnalyser();
       this.analyser.fftSize = 2048;
       source.connect(this.analyser);
-      this.buffer    = new Float32Array(this.analyser.fftSize);
+      this.buffer = new Float32Array(this.analyser.fftSize);
       return true;
     } catch (e) {
-      console.error('[PitchDetector] falha ao inicializar:', e);
+      console.error("[PitchDetector] falha ao inicializar:", e);
       return false;
     }
   }
@@ -58,7 +58,7 @@ export default class PitchDetector {
 
   destroy() {
     this.stop();
-    this.stream?.getTracks().forEach(t => t.stop());
+    this.stream?.getTracks().forEach((t) => t.stop());
     this.audioCtx?.close();
   }
 
@@ -93,35 +93,51 @@ function autoCorrelate(buf, sampleRate) {
   if (rms < 0.008) return -1;
 
   // Corta bordas de cruzamento de zero para reduzir ruído
-  let r1 = 0, r2 = SIZE - 1;
+  let r1 = 0,
+    r2 = SIZE - 1;
   const THRES = 0.2;
-  for (let i = 0; i < SIZE / 2; i++) { if (Math.abs(buf[i]) < THRES) { r1 = i; break; } }
-  for (let i = 1; i < SIZE / 2; i++) { if (Math.abs(buf[SIZE - i]) < THRES) { r2 = SIZE - i; break; } }
+  for (let i = 0; i < SIZE / 2; i++) {
+    if (Math.abs(buf[i]) < THRES) {
+      r1 = i;
+      break;
+    }
+  }
+  for (let i = 1; i < SIZE / 2; i++) {
+    if (Math.abs(buf[SIZE - i]) < THRES) {
+      r2 = SIZE - i;
+      break;
+    }
+  }
 
   const trimBuf = buf.slice(r1, r2);
-  const len     = trimBuf.length;
+  const len = trimBuf.length;
 
   // Constrói o vetor de autocorrelação
   const c = new Array(len).fill(0);
   for (let i = 0; i < len; i++)
-    for (let j = 0; j < len - i; j++)
-      c[i] += trimBuf[j] * trimBuf[j + i];
+    for (let j = 0; j < len - i; j++) c[i] += trimBuf[j] * trimBuf[j + i];
 
   // Encontra o primeiro mínimo local (d), depois o pico após ele
   let d = 0;
   while (c[d] > c[d + 1]) d++;
 
-  let maxVal = -1, maxPos = -1;
+  let maxVal = -1,
+    maxPos = -1;
   for (let i = d; i < len; i++) {
-    if (c[i] > maxVal) { maxVal = c[i]; maxPos = i; }
+    if (c[i] > maxVal) {
+      maxVal = c[i];
+      maxPos = i;
+    }
   }
   if (maxPos < 1 || maxPos >= len - 1) return -1;
 
   // Interpolação parabólica para precisão sub-amostral
-  const x1 = c[maxPos - 1], x2 = c[maxPos], x3 = c[maxPos + 1];
-  const a  = (x1 + x3 - 2 * x2) / 2;
-  const b  = (x3 - x1) / 2;
-  const T0 = a ? (maxPos - b / (2 * a)) : maxPos;
+  const x1 = c[maxPos - 1],
+    x2 = c[maxPos],
+    x3 = c[maxPos + 1];
+  const a = (x1 + x3 - 2 * x2) / 2;
+  const b = (x3 - x1) / 2;
+  const T0 = a ? maxPos - b / (2 * a) : maxPos;
 
   const freq = sampleRate / T0;
 
@@ -134,26 +150,43 @@ function autoCorrelate(buf, sampleRate) {
 /* ----------------------------------------------------------
    Frequência → nome da nota + desvio em cents
    ---------------------------------------------------------- */
-const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const NOTE_NAMES = [
+  "C",
+  "C#",
+  "D",
+  "D#",
+  "E",
+  "F",
+  "F#",
+  "G",
+  "G#",
+  "A",
+  "A#",
+  "B",
+];
 
 function frequencyToNote(freq) {
   const A4_MIDI = 69;
   const A4_FREQ = 440;
 
-  const exactMidi     = A4_MIDI + 12 * Math.log2(freq / A4_FREQ);
-  const roundedMidi   = Math.round(exactMidi);
-  const cents         = Math.round((exactMidi - roundedMidi) * 100);
-  const octave        = Math.floor(roundedMidi / 12) - 1;
-  const noteIdx       = ((roundedMidi % 12) + 12) % 12;
-  const name          = NOTE_NAMES[noteIdx] + octave;
+  const exactMidi = A4_MIDI + 12 * Math.log2(freq / A4_FREQ);
+  const roundedMidi = Math.round(exactMidi);
+  const cents = Math.round((exactMidi - roundedMidi) * 100);
+  const octave = Math.floor(roundedMidi / 12) - 1;
+  const noteIdx = ((roundedMidi % 12) + 12) % 12;
+  const name = NOTE_NAMES[noteIdx] + octave;
 
   return { name, midi: roundedMidi, cents, freq };
 }
 
-/** Converte um nome de nota (ex.: "D#4") para número MIDI */
+/** Converte um nome de nota (ex.: "D#4", "Bb4", "Fb3") para número MIDI */
 export function noteNameToMidi(name) {
-  const m = name.match(/^([A-G]#?)(\d)$/);
+  const m = name.match(/^([A-G])(#|b?)(\d)$/);
   if (!m) return 0;
-  const idx = NOTE_NAMES.indexOf(m[1]);
-  return (parseInt(m[2]) + 1) * 12 + idx;
+  const baseIdx = NOTE_NAMES.indexOf(m[1]);
+  const accident = m[2] === "#" ? 1 : m[2] === "b" ? -1 : 0;
+  const idx = (baseIdx + accident + 12) % 12;
+  // Ajusta oitava quando o bemol faz a nota cruzar para o semitom anterior (ex.: Cb → B anterior)
+  const octaveShift = baseIdx + accident < 0 ? -1 : 0;
+  return (parseInt(m[3]) + 1 + octaveShift) * 12 + idx;
 }

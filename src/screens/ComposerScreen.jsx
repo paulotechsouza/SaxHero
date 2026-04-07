@@ -1,5 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { GameEngine } from "../lib/GameEngine.js";
+import {
+  GameEngine,
+  SAX_TRANSPOSITIONS,
+  midiToNoteName,
+} from "../lib/GameEngine.js";
+import { noteNameToMidi } from "../lib/PitchDetector.js";
 
 // ── Tabelas ──────────────────────────────────────────────────────────────────
 
@@ -42,8 +47,14 @@ function buildDisplayName(degreeIdx, octave, accident) {
   return `${SOLFEJO[degreeIdx]}${accident ? (accident === "#" ? "♯" : "♭") : ""}${octave}`;
 }
 
+// Converte pitch escrito (o que o saxofonista lê) → pitch de concerto (armazenado no engine)
+function writtenToConcert(noteName, saxType) {
+  const offset = SAX_TRANSPOSITIONS[saxType] ?? 0;
+  return midiToNoteName(noteNameToMidi(noteName) - offset);
+}
+
 // Constrói objeto de música compatível com GameEngine a partir do estado do compositor
-function buildSong({ title, author, bpm, timeSig, notes }) {
+function buildSong({ title, author, bpm, timeSig, notes, saxType }) {
   const [numStr, denStr] = timeSig.split("/");
   const numerator = parseInt(numStr, 10);
   const denominator = parseInt(denStr, 10);
@@ -53,7 +64,7 @@ function buildSong({ title, author, bpm, timeSig, notes }) {
   const converted = notes
     .map((n) => {
       const obj = {
-        note: n.isRest ? "R" : n.name,
+        note: n.isRest ? "R" : writtenToConcert(n.name, saxType),
         time: beat * spb,
         duration: n.beats * spb,
         beatStart: beat,
@@ -114,7 +125,7 @@ export default function ComposerScreen({ navigate, saxType = "alto" }) {
       }
       return;
     }
-    const song = buildSong({ title, author, bpm, timeSig, notes });
+    const song = buildSong({ title, author, bpm, timeSig, notes, saxType });
     engine.setup(song, "easy", 1.0, saxType);
     engine.drawStatic();
   }, [notes, bpm, timeSig, title, author, saxType]);
