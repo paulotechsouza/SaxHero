@@ -1,0 +1,55 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Exemplo de arquivo .song para SaxHero
+# Compile com:  node scripts/compile-song.js songs/exemplo.song
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── Metadados ────────────────────────────────────────────────────────────────
+TITULO:      Exemplo — Modo de Ré Maior
+AUTOR:       SaxHero
+ID:          exemplo_re_maior
+BPM:         100
+COMPASSO:    4/4
+SAX:         alto          # alto | tenor | soprano | concerto
+DIFICULDADE: 2             # 1 (fácil) a 5 (difícil)
+
+# ── Notas ────────────────────────────────────────────────────────────────────
+# Formato de cada nota:  NOTA:DURAÇÃO
+#
+# NOTA — aceita solfejo ou inglês, com oitava e acidente:
+#   Do4   Re4   Mi4   Fa4   Sol4  La4   Si4   Do5
+#   C4    D4    E4    F4    G4    A4    B4    C5
+#   Do#4  Reb4  F#4   Bb3   Sol#3              (sustenidos e bemóis)
+#   ---   pausa                                (pausa)
+#
+# DURAÇÃO — nome ou fração (semínima = 1 tempo):
+#   sb  ou  1/1   = semibreve      (4 tempos)
+#   m   ou  1/2   = mínima         (2 tempos)
+#   s   ou  1/4   = semínima       (1 tempo)
+#   c   ou  1/8   = colcheia       (0,5 tempo)
+#   sc  ou  1/16  = semicolcheia   (0,25 tempo)
+#   Adicione . para pontuada: m.=3  s.=1.5  c.=0.75
+#   Ou use número decimal:    Re4:1.5
+
+# Compasso 1 — Re Fa# La Re5 (arpejo de Ré maior, semínimas)
+Re4:s  Fa#4:s  La4:s  Re5:s
+
+# Compasso 2 — Mi Sol Si Mi5 (subindo)
+Mi4:s  Sol4:s  Si4:s  Mi5:s
+
+# Compasso 3 — Fa# Mi Ré Do# (descendo com colcheias)
+Fa#5:m  Mi5:c  Re5:c  Do#5:s
+
+# Compasso 4 — Re5 mínima pontuada + pausa de semínima
+Re5:m.  ---:s
+
+# Compasso 5 — melodia com pausa e colcheias
+---:s   La4:c  Si4:c  Do#5:c  Re5:c   Mi5:s
+
+# Compasso 6 — La Sol Fa# Mi
+La4:s  Sol4:s  Fa#4:s  Mi4:s
+
+# Compasso 7 — Re mínima + Re Sol semínimas
+Re4:m  Re4:s  Sol4:s
+
+# Compasso 8 — Re semibreve
+Re4:sb

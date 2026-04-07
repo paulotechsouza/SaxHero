@@ -680,6 +680,25 @@ export class GameEngine {
     }
   }
 
+  // ── Renderização estática (sem loop — para o Compositor) ──────────────
+  drawStatic() {
+    if (!this._scoreData) return;
+    const ctx = this.ctx;
+    const L = this._getLayout();
+    const { W, H, staffH, rowH, topPad } = L;
+    const { numMeasures } = this._scoreData;
+    const totalRows = Math.ceil(numMeasures / L.measPerRow);
+
+    ctx.fillStyle = "#f2f3f5";
+    ctx.fillRect(0, 0, W, H);
+
+    for (let row = 0; row < totalRows; row++) {
+      const rowTop = topPad + row * rowH;
+      if (rowTop > H + staffH) break;
+      this._drawRow(ctx, L, row, rowTop, -999, -1);
+    }
+  }
+
   // ── Renderização principal (chamada a cada frame) ──────────────
   _render() {
     if (!this._scoreData) return;
