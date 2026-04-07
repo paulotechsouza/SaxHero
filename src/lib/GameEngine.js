@@ -1,10 +1,17 @@
 /**
- * GameEngine — Sheet-music renderer + game loop
+ * GameEngine — Renderizador de partitura + loop de jogo
+ *
+ * Responsabilidades:
+ *  - Construir o layout estático da partitura (compassos, pausas, grupos de colcheia)
+ *  - Executar o loop de animação (requestAnimationFrame) e avançar o tempo de jogo
+ *  - Avaliar o pitch detectado contra as notas esperadas e calcular pontuação
+ *  - Reproduzir a música de fundo e o metrônomo sincronizados com o jogo
+ *  - Renderizar tudo no Canvas 2D (partitura, cursor, partículas, indicador de metrônomo)
  */
 
 import { noteNameToMidi } from "./PitchDetector.js";
 
-// ── Note colors ───────────────────────────────────────────────
+// ── Cores das notas (por nome de nota) ──────────────────────────
 export const NOTE_COLORS = {
   C: "#ef4444",
   "C#": "#f97316",
@@ -23,7 +30,7 @@ export function noteColor(name) {
   return NOTE_COLORS[name.replace(/\d+$/, "")] ?? "#ffffff";
 }
 
-// ── Instrument transposition ─────────────────────────────────
+// ── Transposição por tipo de saxofone ────────────────────────
 export const SAX_TRANSPOSITIONS = { alto: 9, tenor: 2, soprano: 2 };
 export const SAX_LABELS = {
   alto: "Alto (Mib)",
@@ -48,8 +55,8 @@ export function midiToNoteName(midi) {
   return _NOTES[((midi % 12) + 12) % 12] + (Math.floor(midi / 12) - 1);
 }
 
-// ── Diatonic step helpers (Treble Clef) ──────────────────────
-// C4=0, D4=1, E4=2 … B4=6, C5=7 …  (ignores accidentals)
+// ── Posicionamento diatônico na pauta (Clave de Sol) ─────────
+// C4=0, D4=1, E4=2 … B4=6, C5=7 … (ignora acidentes)
 export const DIATONIC = { C: 0, D: 1, E: 2, F: 3, G: 4, A: 5, B: 6 };
 
 export function diatonicStep(noteName) {
@@ -58,23 +65,27 @@ export function diatonicStep(noteName) {
   return (parseInt(m[3]) - 4) * 7 + DIATONIC[m[1]];
 }
 
-// Top staff line = F5 (step 10).  Each diatonic step = ls/2 pixels.
+// Linha superior da pauta = F5 (passo 10). Cada passo diatônico = ls/2 pixels.
 export function staffNoteY(noteName, staffTopY, ls) {
   return staffTopY + (10 - diatonicStep(noteName)) * (ls / 2);
 }
 
-// ── Musical duration snapping ─────────────────────────────────
-// Rounds a raw beat value to the nearest standard musical duration.
-// Prevents floating-point drift (e.g. 0.499 → 0.5, 1.49 → 1.5) from
-// breaking note-type classification, beam grouping, and rest calculation.
+// ── Arredondamento para duração musical padrão ────────────────
+// Arredonda um valor de tempo bruto para a duração musical padrão mais próxima.
+// Evita deriva de ponto flutuante (ex.: 0.499 → 0.5, 1.49 → 1.5) que quebraria
+// a classificação do tipo de nota, agrupamento de colcheias e cálculo de pausas.
 function snapToMusical(beats) {
-  // Standard note durations in beats (quarter = 1 beat)
+  // Durações padrão em tempos (semínima = 1 tempo)
   const VALUES = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0];
-  const TOLERANCE = 0.07; // ±70 ms at 60 BPM — tight enough to be safe, wide enough for real conversion noise
-  let best = beats, bestDist = Infinity;
+  const TOLERANCE = 0.07; // ±70 ms a 60 BPM — tolerância segura sem mascarar erros reais
+  let best = beats,
+    bestDist = Infinity;
   for (const v of VALUES) {
     const d = Math.abs(beats - v);
-    if (d < bestDist) { bestDist = d; best = v; }
+    if (d < bestDist) {
+      bestDist = d;
+      best = v;
+    }
   }
   return bestDist <= TOLERANCE ? best : beats;
 }
@@ -117,16 +128,16 @@ export class GameEngine {
     this.beatFlashAt = -9999;
     this.beatAccent = false;
 
-    // Background music
+    // Música de fundo
     this.audioBuffers = new Map();
     this._bgSrc = null;
     this._bgGain = null;
     this.bgVolume = 0.35;
 
-    // Pitch stability
+    // Estabilidade do pitch (buffer circular de leituras recentes)
     this._pitchBuf = [];
 
-    // Score layout
+    // Layout da partitura (calculado em _buildScore)
     this._scoreData = null;
     this._rests = [];
     this._scrollY = 0;
@@ -142,7 +153,7 @@ export class GameEngine {
     c.height = c.offsetHeight || window.innerHeight - 80;
   }
 
-  // ── Setup ────────────────────────────────────────────────────
+  // ── Configuração inicial (chamado antes de begin()) ──────────────
   setup(song, difficulty, speedMult, saxType) {
     this.song = song;
     this.difficulty = difficulty;
@@ -197,7 +208,7 @@ export class GameEngine {
     this.callbacks.onDetectedNote?.("—");
   }
 
-  // ── Score layout build ───────────────────────────────────────
+  // ── Construção do layout da partitura ───────────────────────
   _buildScore() {
     const BEATS_PER_MEASURE = 4;
     const bpm = this.song.bpm;
@@ -205,16 +216,16 @@ export class GameEngine {
     const firstNoteTime = this.notes.length ? this.notes[0].time : 0;
 
     for (const note of this.notes) {
-      // Always snap durationBeats — either convert from seconds or re-snap a
-      // pre-existing value that may carry float drift from a prior import.
+      // Sempre arredonda durationBeats — converte de segundos se ausente ou
+      // re-arredonda valor preexistente que pode ter deriva de ponto flutuante.
       if (note.durationBeats === undefined) {
         note.durationBeats = snapToMusical(note.duration / spb);
       } else {
         note.durationBeats = snapToMusical(note.durationBeats);
       }
 
-      // Snap beatStart to the nearest 1/8-beat grid to kill float drift before
-      // it reaches measureIndex / beatInMeasure arithmetic.
+      // Arredonda beatStart para o grid de 1/8 de tempo para eliminar deriva
+      // antes de chegar ao cálculo de measureIndex / beatInMeasure.
       if (note.beatStart === undefined) {
         note.beatStart =
           Math.round(((note.time - firstNoteTime) / spb) * 8) / 8;
@@ -255,7 +266,7 @@ export class GameEngine {
           rests.push({
             measureIndex: m,
             beatInMeasure: pos,
-            // Snap so _drawRest receives a clean musical value
+            // Arredonda para que _drawRest receba um valor musical preciso
             durationBeats: snapToMusical(note.beatInMeasure - pos),
           });
         }
@@ -282,29 +293,33 @@ export class GameEngine {
     const flush = () => {
       if (cur.length >= 2) {
         const id = groupId++;
-        cur.forEach((n) => { n.beamGroupId = id; });
+        cur.forEach((n) => {
+          n.beamGroupId = id;
+        });
       }
       cur = [];
     };
 
     for (const note of sorted) {
-      // Eighth (0.5) and sixteenth (0.25) are beamable.
-      // Use <= 0.52 instead of <= 0.5 as a float-safety margin — after
-      // snapToMusical the value should be exact, but this guards against
-      // any residual drift from pre-snapped song data.
+      // Colcheias (0,5) e semicolcheias (0,25) podem ser agrupadas.
+      // Usa <= 0,52 em vez de <= 0,5 como margem de segurança para ponto flutuante.
       if (note.durationBeats <= 0.52) {
         if (cur.length === 0) {
           cur.push(note);
         } else {
           const prev = cur[cur.length - 1];
           const gap = note.beatStart - (prev.beatStart + prev.durationBeats);
-          // 0.03-beat gap tolerance absorbs rounding after snapping.
-          // Also enforce the 4/4 half-measure beam-break rule: beams must not
-          // cross the beat-2 → beat-3 boundary (beatInMeasure 1.5 → 2.0).
+          // Tolerância de 0,03 tempos absorve arredondamentos após o snap.
+          // Também aplica a regra de 4/4: ligaduras não cruzam a fronteira
+          // tempo-2 → tempo-3 (beatInMeasure 1,5 → 2,0).
           const prevHalf = Math.floor(prev.beatInMeasure / 2);
           const noteHalf = Math.floor(note.beatInMeasure / 2);
           const sameHalf = prevHalf === noteHalf;
-          if (gap < 0.03 && note.measureIndex === prev.measureIndex && sameHalf) {
+          if (
+            gap < 0.03 &&
+            note.measureIndex === prev.measureIndex &&
+            sameHalf
+          ) {
             cur.push(note);
           } else {
             flush();
@@ -318,7 +333,7 @@ export class GameEngine {
     flush();
   }
 
-  // ── Start / Pause / Stop ────────────────────────────────────
+  // ── Iniciar / Pausar / Parar ────────────────────────────────
   begin() {
     this.startTime = performance.now() / 1000;
     this.isPlaying = true;
@@ -373,7 +388,7 @@ export class GameEngine {
     window.removeEventListener("resize", () => this._resize());
   }
 
-  // ── Game loop ────────────────────────────────────────────────
+  // ── Loop principal de jogo ─────────────────────────────────
   _loop() {
     if (!this.isPlaying) return;
     this.rafId = requestAnimationFrame(() => this._loop());
@@ -383,7 +398,7 @@ export class GameEngine {
     this._render();
   }
 
-  // ── Update / scoring ─────────────────────────────────────────
+  // ── Atualização / pontuação ──────────────────────────────────
   _update() {
     const HIT_W = 0.28,
       PERF_W = 0.09,
@@ -496,7 +511,7 @@ export class GameEngine {
     });
   }
 
-  // ── Background music ─────────────────────────────────────────
+  // ── Música de fundo ─────────────────────────────────────────
   storeAudioBuffer(songId, buf) {
     this.audioBuffers.set(songId, buf);
   }
@@ -512,7 +527,11 @@ export class GameEngine {
       await tmpCtx.close();
       this.audioBuffers.set(song.id, audioBuf);
     } catch (e) {
-      console.warn("[GameEngine] Could not load audio:", song.audioSrc, e);
+      console.warn(
+        "[GameEngine] Não foi possível carregar áudio:",
+        song.audioSrc,
+        e,
+      );
     }
   }
 
@@ -569,7 +588,7 @@ export class GameEngine {
     }
   }
 
-  // ── Transposition ─────────────────────────────────────────────
+  // ── Transposição (tom de concerto → nota escrita) ──────────────
   _writtenName(concertNote) {
     const offset = SAX_TRANSPOSITIONS[this.saxType] ?? 0;
     if (offset === 0) return concertNote;
@@ -590,11 +609,11 @@ export class GameEngine {
     return { W, H, ls, clefW, measPerRow, measureW, staffH, rowH, topPad };
   }
 
-  // x position of a note within a measure (proportional to beat)
+  // Posição X da nota dentro do compasso (proporcional ao tempo)
   _noteX(beatInMeasure, beatsPerMeasure, measureStartX, measureW) {
-    // Proportional padding so spacing scales with the canvas — notes never
-    // crowd the barline on wide canvases or get clipped on narrow ones.
-    const lPad = measureW * 0.10;
+    // Padding proporcional para que o espaçamento escale com o canvas —
+    // as notas nunca se amontoam na barra nem são cortadas em telas estreitas.
+    const lPad = measureW * 0.1;
     const rPad = measureW * 0.05;
     return (
       measureStartX +
@@ -603,7 +622,7 @@ export class GameEngine {
     );
   }
 
-  // Canvas position of a note (for particles, etc.)
+  // Posição da nota no canvas (usada para partículas, etc.)
   _getNoteScreenPos(note) {
     if (!this._scoreData) return null;
     const L = this._getLayout();
@@ -622,7 +641,7 @@ export class GameEngine {
     return { x, y: staffNoteY(wn, rowTop, ls) };
   }
 
-  // ── Particles ────────────────────────────────────────────────
+  // ── Partículas de acerto ───────────────────────────────────────
   _spawnParticles(note) {
     const pos = this._getNoteScreenPos(note);
     if (!pos) return;
@@ -641,7 +660,7 @@ export class GameEngine {
     }
   }
 
-  // ── Render ────────────────────────────────────────────────────
+  // ── Renderização principal (chamada a cada frame) ──────────────
   _render() {
     if (!this._scoreData) return;
 
@@ -650,7 +669,7 @@ export class GameEngine {
     const { W, H, ls, staffH, rowH, topPad } = L;
     const { numMeasures, beatsPerMeasure, firstNoteTime } = this._scoreData;
 
-    // Current beat relative to first note
+    // Tempo atual relativo à primeira nota
     const currentBeat = ((this.gameTime - firstNoteTime) * this.song.bpm) / 60;
     const totalRows = Math.ceil(numMeasures / L.measPerRow);
     const activeMeasure = Math.max(
@@ -662,15 +681,15 @@ export class GameEngine {
       Math.floor(activeMeasure / L.measPerRow),
     );
 
-    // Smooth scroll
+    // Scroll suave
     const targetY = Math.max(0, activeRow * rowH - H * 0.08);
     this._scrollY += (targetY - this._scrollY) * 0.07;
 
-    // Background (cream/white for sheet music)
+    // Fundo (branco/creme para partitura)
     ctx.fillStyle = "#f2f3f5";
     ctx.fillRect(0, 0, W, H);
 
-    // Visible rows
+    // Linhas visíveis no viewport
     const firstRow = Math.max(0, Math.floor((this._scrollY - topPad) / rowH));
     const lastRow = Math.min(totalRows - 1, firstRow + Math.ceil(H / rowH) + 1);
 
@@ -681,10 +700,10 @@ export class GameEngine {
       this._drawRow(ctx, L, row, rowTop, currentBeat, activeRow);
     }
 
-    // Metronome indicator
+    // Indicador de metrônomo
     this._drawMetronomeIndicator(ctx, W, H);
 
-    // Particles
+    // Partículas
     for (const p of this.particles) {
       ctx.save();
       ctx.globalAlpha = Math.max(0, p.life);
@@ -698,7 +717,7 @@ export class GameEngine {
     }
   }
 
-  // ── Draw one row of the score ────────────────────────────────
+  // ── Renderiza uma linha da partitura ──────────────────────────────
   _drawRow(ctx, L, row, rowTop, currentBeat, activeRow) {
     const { W, ls, clefW, measPerRow, measureW, staffH } = L;
     const { numMeasures, beatsPerMeasure } = this._scoreData;
@@ -710,12 +729,12 @@ export class GameEngine {
     );
     const bot = rowTop + staffH;
 
-    // White band for staff area — extra margin so beamed-group stems that
-    // extend well above/below the staff don't bleed into the grey background.
+    // Faixa branca da área da pauta — margem extra para que hastes de grupos
+    // agrupados que se estendam acima/abaixo não invadam o fundo cinza.
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, rowTop - ls * 4.5, W, staffH + ls * 9.0);
 
-    // 5 staff lines (from start of clef area to end of row)
+    // 5 linhas da pauta (do início da área de clave ao fim da linha)
     ctx.lineWidth = 1;
     for (let i = 0; i < 5; i++) {
       ctx.strokeStyle = "#999";
@@ -725,7 +744,7 @@ export class GameEngine {
       ctx.stroke();
     }
 
-    // Opening barline
+    // Barra de compasso inicial
     ctx.strokeStyle = "#444";
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -733,14 +752,14 @@ export class GameEngine {
     ctx.lineTo(clefW - 2, bot);
     ctx.stroke();
 
-    // Treble clef
+    // Clave de sol
     ctx.fillStyle = "#222";
     ctx.font = `${ls * 7}px 'Times New Roman', Georgia, serif`;
     ctx.textBaseline = "alphabetic";
     ctx.textAlign = "left";
     ctx.fillText("\uD834\uDD1E", 2, bot + ls * 0.65);
 
-    // Time signature 4/4
+    // Fórmula de compasso 4/4
     const tsX = ls * 5.9;
     ctx.fillStyle = "#222";
     ctx.font = `bold ${ls * 1.9}px 'Times New Roman', Georgia, serif`;
@@ -749,14 +768,14 @@ export class GameEngine {
     ctx.fillText("4", tsX, rowTop + ls * 1.0);
     ctx.fillText("4", tsX, rowTop + ls * 3.0);
 
-    // Measure barlines + numbers
+    // Barras de compasso e números
     for (let m = firstMeasure; m <= lastMeasure; m++) {
       const mOff = m - firstMeasure;
       const bx = clefW + (mOff + 1) * measureW;
 
       const isLastMeasure = m === numMeasures - 1;
       if (isLastMeasure) {
-        // Final double barline: thin + thick, spaced by ~0.4 spaces
+        // Barra dupla final: fina + grossa, espaçadas em ~0,4 espaços
         ctx.strokeStyle = "#555";
         ctx.lineWidth = 1.2;
         ctx.beginPath();
@@ -770,8 +789,8 @@ export class GameEngine {
         ctx.lineTo(bx, bot);
         ctx.stroke();
       } else {
-        // Regular barline — slightly lighter than the opening barline so
-        // notes and beams read before the bar structure.
+        // Barra normal — ligeiramente mais clara que a barra inicial
+        // para que notas e ligaduras sejam lidas antes da estrutura de compasso.
         ctx.strokeStyle = "#aaa";
         ctx.lineWidth = 1.2;
         ctx.beginPath();
@@ -780,7 +799,7 @@ export class GameEngine {
         ctx.stroke();
       }
 
-      // Measure number — small, subtle label above the barline
+      // Número do compasso — rótulo pequeno e sutil acima da barra
       ctx.fillStyle = "#bbb";
       ctx.font = `${ls * 0.65}px sans-serif`;
       ctx.textAlign = "left";
@@ -788,7 +807,7 @@ export class GameEngine {
       ctx.fillText(m + 1, clefW + mOff * measureW + 3, rowTop - ls * 0.5);
     }
 
-    // Rests
+    // Pausas
     for (const rest of this._rests) {
       if (rest.measureIndex < firstMeasure || rest.measureIndex > lastMeasure)
         continue;
@@ -802,7 +821,7 @@ export class GameEngine {
       this._drawRest(ctx, rest.durationBeats, x, rowTop, ls);
     }
 
-    // Collect beam groups for this row
+    // Coletar grupos de ligadura desta linha
     const beamGroupsMap = new Map();
     for (const note of this.notes) {
       if (note.measureIndex < firstMeasure || note.measureIndex > lastMeasure)
@@ -814,7 +833,7 @@ export class GameEngine {
       }
     }
 
-    // Notes
+    // Notas
     for (const note of this.notes) {
       if (note.measureIndex < firstMeasure || note.measureIndex > lastMeasure)
         continue;
@@ -839,12 +858,12 @@ export class GameEngine {
       );
     }
 
-    // Beams
+    // Ligaduras de colcheia
     for (const [, groupNotes] of beamGroupsMap) {
       this._drawBeam(ctx, L, groupNotes, firstMeasure, rowTop);
     }
 
-    // Cursor
+    // Cursor de posição atual
     if (activeRow === row) {
       const curMeasure = Math.floor(currentBeat / beatsPerMeasure);
       const clamped = Math.max(firstMeasure, Math.min(lastMeasure, curMeasure));
@@ -860,7 +879,7 @@ export class GameEngine {
     }
   }
 
-  // ── Note shape rendering ─────────────────────────────────────
+  // ── Desenho da nota (cabeça, haste, acidentes, ponto de aumento) ─────
   _drawNoteShape(
     ctx,
     note,
@@ -871,8 +890,8 @@ export class GameEngine {
     ls,
     isBeamed = false,
   ) {
-    // Snap here as a last-resort safety net in case note.durationBeats was set
-    // externally (e.g. live song import) and bypassed _buildScore snapping.
+    // Última rede de segurança: arredonda durationBeats caso tenha sido
+    // definido externamente (ex.: importação ao vivo) sem passar por _buildScore.
     const dur = snapToMusical(note.durationBeats ?? 1);
     const step = diatonicStep(writtenNote);
     const stemUp = step < 6;
@@ -884,34 +903,34 @@ export class GameEngine {
           ? "#b91c1c"
           : "#1a1a2e";
 
-    // ── Note-type classification ───────────────────────────────
-    // Detect dotted values first; then extract the base duration.
-    // With snapped values the tolerances below are generous on purpose —
-    // they make the renderer resilient even if a caller skips snapping.
+    // ── Classificação do tipo de nota ──────────────────────────────
+    // Detecta valores pontuados primeiro; depois extrai a duração base.
+    // Com valores arredondados as tolerâncias são generosas de propósito —
+    // tornam o renderizador resistente mesmo se o caller pular o snap.
     const hasDot =
-      Math.abs(dur - 3.0)  < 0.13 ||   // dotted half
-      Math.abs(dur - 1.5)  < 0.13 ||   // dotted quarter
-      Math.abs(dur - 0.75) < 0.13;     // dotted eighth
+      Math.abs(dur - 3.0) < 0.13 || // dotted half
+      Math.abs(dur - 1.5) < 0.13 || // dotted quarter
+      Math.abs(dur - 0.75) < 0.13; // dotted eighth
 
-    // baseDur is the undotted equivalent (2, 1, or 0.5 respectively)
+    // baseDur é o equivalente sem ponto (2, 1 ou 0,5 respectivamente)
     const baseDur = hasDot ? dur / 1.5 : dur;
 
-    const isWhole     = baseDur >= 4.0 - 0.13;
-    const isHalf      = !isWhole && baseDur >= 2.0 - 0.13;
-    // isQuarter: everything between half and eighth
-    const isQuarter   = !isWhole && !isHalf && baseDur >= 1.0 - 0.13;
-    const isEighth    = !isWhole && !isHalf && !isQuarter && baseDur >= 0.5 - 0.13;
+    const isWhole = baseDur >= 4.0 - 0.13;
+    const isHalf = !isWhole && baseDur >= 2.0 - 0.13;
+    // isQuarter: tudo entre mínima e colcheia
+    const isQuarter = !isWhole && !isHalf && baseDur >= 1.0 - 0.13;
+    const isEighth = !isWhole && !isHalf && !isQuarter && baseDur >= 0.5 - 0.13;
     const isSixteenth = !isWhole && !isHalf && !isQuarter && !isEighth; // 0.25
-    // Open noteheads for whole and half (and dotted half)
-    const isFilled    = !isWhole && !isHalf;
+    // Cabeças abertas para semibreve e mínima (incluindo mínima pontuada)
+    const isFilled = !isWhole && !isHalf;
 
     const rx = isWhole ? ls * 0.58 : ls * 0.5;
     const ry = isWhole ? ls * 0.36 : ls * 0.32;
 
-    // Ledger lines
+    // Linhas suplementares
     this._drawLedgerLines(ctx, step, x, staffTopY, ls, rx, color);
 
-    // Notehead
+    // Cabeça da nota
     ctx.save();
     if (note.state === "hit") {
       ctx.shadowBlur = 14;
@@ -928,7 +947,7 @@ export class GameEngine {
       ctx.fillStyle = color;
       ctx.fill();
     } else {
-      // Open notehead: white fill first (covers staff lines), then stroke
+      // Cabeça aberta: fundo branco primeiro (cobre linhas da pauta), depois contorno
       ctx.fillStyle = "#ffffff";
       ctx.fill();
       ctx.strokeStyle = color;
@@ -937,7 +956,7 @@ export class GameEngine {
     }
     ctx.restore();
 
-    // Accidental — vertically centered on the notehead (not offset)
+    // Acidente — centralizado verticalmente na cabeça da nota (sem deslocamento)
     const acc = writtenNote.match(/^[A-G](#|b)/);
     if (acc) {
       ctx.save();
@@ -949,9 +968,9 @@ export class GameEngine {
       ctx.restore();
     }
 
-    // Augmentation dot — placed in the space to the right of the notehead.
-    // If the note sits on a staff line (even diatonic step) nudge the dot
-    // up by one diatonic step (ls * 0.5) into the space above.
+    // Ponto de aumento — colocado no espaço à direita da cabeça.
+    // Se a nota cai numa linha da pauta (passo diatônico par) sobe o ponto
+    // um passo diatônico (ls * 0,5) para o espaço acima.
     if (hasDot) {
       const dotY = step % 2 === 0 ? y - ls * 0.5 : y;
       ctx.save();
@@ -962,8 +981,8 @@ export class GameEngine {
       ctx.restore();
     }
 
-    // Stem + flags — skipped for whole notes and beamed notes
-    // (beamed notes get their stems drawn by _drawBeam)
+    // Haste + bandeiras — ignoradas para semibreves e notas agrupadas
+    // (notas agrupadas recebem suas hastes pelo método _drawBeam)
     if (!isWhole && !isBeamed) {
       const stemLen = ls * 3.5;
       const stemX = stemUp ? x + rx * 0.82 : x - rx * 0.82;
@@ -985,7 +1004,7 @@ export class GameEngine {
     }
   }
 
-  // ── Flag rendering ────────────────────────────────────────────
+  // ── Renderização de bandeiras (flags) ──────────────────────────
   _drawFlags(ctx, stemX, stemTopY, stemUp, numFlags, ls, color) {
     ctx.save();
     ctx.strokeStyle = color;
@@ -1012,94 +1031,101 @@ export class GameEngine {
 
   // ── Beam rendering ────────────────────────────────────────────
   //
-  // Engraving rules implemented here:
-  //  • Beam direction decided by majority vote (same as before).
-  //  • Beam slope follows 30% of the melodic contour between first and last
-  //    note, capped at ±0.4 spaces total rise so the angle stays readable.
-  //  • The beam's y-intercept is set so that the first note has a preferred
-  //    stem length (3.5 spaces); then every note is checked and the beam is
-  //    pushed away from the noteheads until no stem is shorter than 2.8 spaces.
-  //  • Stems are drawn individually to the exact beam y at their x position.
-  //  • The beam itself is a filled parallelogram (not a flat rectangle) so
-  //    the slope is visible.
-  //  • A second parallel beam is drawn for sixteenth-note pairs.
+  // Regras de gravura implementadas aqui:
+  //  • Direção da ligadura decidida por voto majoritário das notas.
+  //  • Inclinação segue 30% do contorno melódico entre a primeira e a última
+  //    nota, limitada a ±0,4 espaços para que o ângulo permaneça legível.
+  //  • O ponto de ancoragem Y é definido para que a primeira nota tenha
+  //    comprimento de haste preferencial (3,5 espaços); cada nota é verificada
+  //    e a ligadura é afastada até nenhuma haste ficar menor que 2,8 espaços.
+  //  • Hastes desenhadas individualmente até o Y exato da ligadura.
+  //  • A ligadura é um paralelogramo preenchido (não um retângulo plano)
+  //    para que a inclinação seja visível.
+  //  • Uma segunda ligadura paralela é desenhada para pares de semicolcheias.
   _drawBeam(ctx, L, groupNotes, firstMeasure, rowTop) {
     if (groupNotes.length < 2) return;
 
     const { ls, clefW, measureW } = L;
     const { beatsPerMeasure } = this._scoreData;
 
-    const rx      = ls * 0.5;
-    const ry      = ls * 0.32;
-    const BEAM_H  = ls * 0.42;  // beam bar thickness
-    const BEAM_G  = ls * 0.26;  // gap between primary and secondary bar
-    const PREF    = ls * 3.5;   // preferred stem length (notehead → beam outer edge)
-    const MIN     = ls * 2.8;   // minimum stem length
+    const rx = ls * 0.5;
+    const ry = ls * 0.32;
+    const BEAM_H = ls * 0.42; // espessura da barra
+    const BEAM_G = ls * 0.26; // espaço entre barra primária e secundária
+    const PREF = ls * 3.5; // comprimento de haste preferencial (cabeça → borda externa)
+    const MIN = ls * 2.8; // comprimento mínimo de haste
 
     const sorted = [...groupNotes].sort((a, b) => a.beatStart - b.beatStart);
 
-    // ── Build per-note data ──────────────────────────────────────
+    // ── Dados por nota ─────────────────────────────────────────────
     const nd = sorted.map((note) => {
-      const wn   = this._writtenName(note.note);
+      const wn = this._writtenName(note.note);
       const step = diatonicStep(wn);
       const mOff = note.measureIndex - firstMeasure;
-      const x    = this._noteX(note.beatInMeasure, beatsPerMeasure,
-                               clefW + mOff * measureW, measureW);
-      const y    = staffNoteY(wn, rowTop, ls);
+      const x = this._noteX(
+        note.beatInMeasure,
+        beatsPerMeasure,
+        clefW + mOff * measureW,
+        measureW,
+      );
+      const y = staffNoteY(wn, rowTop, ls);
       return { x, y, step, note };
     });
 
-    // ── Beam direction: majority vote ────────────────────────────
+    // ── Direção da ligadura: voto majoritário ──────────────────────
     const beamUp = nd.filter((n) => n.step < 6).length >= nd.length / 2;
 
-    // Stem attachment X: right side of head for stem-up, left for stem-down
-    const stemXof = (n) => beamUp ? n.x + rx * 0.82 : n.x - rx * 0.82;
+    // X de ancoragem da haste: direito para haste acima, esquerdo para abaixo
+    const stemXof = (n) => (beamUp ? n.x + rx * 0.82 : n.x - rx * 0.82);
 
-    const x0    = stemXof(nd[0]);
-    const xN    = stemXof(nd[nd.length - 1]);
+    const x0 = stemXof(nd[0]);
+    const xN = stemXof(nd[nd.length - 1]);
     const xSpan = xN - x0 || 1;
 
-    // ── Beam slope ───────────────────────────────────────────────
-    // Follow 30% of the melodic interval between first and last note,
-    // capped so the total rise/fall across the group ≤ 0.4 spaces.
-    const melodicDelta = nd[nd.length - 1].y - nd[0].y; // positive = melody falls
-    const rawDelta     = melodicDelta * 0.30;
-    const beamDelta    = Math.max(-ls * 0.40, Math.min(ls * 0.40, rawDelta));
-    const slope        = beamDelta / xSpan;
+    // ── Inclinação da ligadura ──────────────────────────────────────
+    // Segue 30% do intervalo melódico entre a primeira e a última nota,
+    // limitado para que a subida/descida total do grupo ≤ 0,4 espaços.
+    const melodicDelta = nd[nd.length - 1].y - nd[0].y; // positivo = melodia desce
+    const rawDelta = melodicDelta * 0.3;
+    const beamDelta = Math.max(-ls * 0.4, Math.min(ls * 0.4, rawDelta));
+    const slope = beamDelta / xSpan;
 
-    // Beam anchor Y at a given stem x (the outer edge — top for up, bottom for down)
-    // Initialise from first note's preferred stem length, then push out as needed.
+    // Y de ancoragem no X de cada haste (borda externa)
+    // Inicializa pela primeira nota com comprimento preferencial, depois ajusta.
     let b0 = beamUp ? nd[0].y - PREF : nd[0].y + PREF;
 
-    // Single-pass: find the most-constraining note and shift b0 accordingly.
-    // For beamUp  we need: b0 + slope*(sx-x0) ≤ n.y - MIN  →  push b0 down (smaller Y).
-    // For beamDown we need: b0 + slope*(sx-x0) ≥ n.y + MIN  →  push b0 up  (larger Y).
+    // Passo único: nota mais restritiva desloca b0 conforme.
+    // beamUp:   b0 + slope*(sx-x0) ≤ n.y - MIN  → reduz b0.
+    // beamDown: b0 + slope*(sx-x0) ≥ n.y + MIN  → aumenta b0.
     for (const n of nd) {
       const sx = stemXof(n);
-      const a  = slope * (sx - x0);          // contribution from slope at this x
-      if (beamUp)   b0 = Math.min(b0, n.y - MIN - a);
-      else          b0 = Math.max(b0, n.y + MIN - a);
+      const a = slope * (sx - x0); // contribuição da inclinação neste x
+      if (beamUp) b0 = Math.min(b0, n.y - MIN - a);
+      else b0 = Math.max(b0, n.y + MIN - a);
     }
 
-    // Beam anchor Y at any x after the b0 adjustment
+    // Y de ancoragem após ajuste de b0
     const anchorY = (x) => b0 + slope * (x - x0);
 
-    // ── Colors ───────────────────────────────────────────────────
+    // ── Cores ──────────────────────────────────────────────────────
     const stateColor = (n) =>
-      n.note.state === "hit"  ? "#15803d" :
-      n.note.state === "miss" ? "#b91c1c" : "#1a1a2e";
-    const allHit  = sorted.every((n) => n.state === "hit");
+      n.note.state === "hit"
+        ? "#15803d"
+        : n.note.state === "miss"
+          ? "#b91c1c"
+          : "#1a1a2e";
+    const allHit = sorted.every((n) => n.state === "hit");
     const allMiss = sorted.every((n) => n.state === "miss");
     const beamClr = allHit ? "#15803d" : allMiss ? "#b91c1c" : "#1a1a2e";
 
-    // ── Draw stems ───────────────────────────────────────────────
-    // Each stem runs from the notehead edge to the beam's outer edge.
-    // The beam parallelogram will then fill the BEAM_H thickness inward.
+    // ── Hastes ─────────────────────────────────────────────────────
+    // Cada haste vai da borda da cabeça até a borda externa da ligadura.
+    // O paralelogramo preenche BEAM_H em direção às cabeças de nota.
     ctx.lineWidth = ls * 0.11;
-    ctx.lineCap   = "butt";
+    ctx.lineCap = "butt";
     for (const n of nd) {
-      const sx  = stemXof(n);
-      const tip = anchorY(sx); // outer edge of beam at this stem
+      const sx = stemXof(n);
+      const tip = anchorY(sx); // borda externa da ligadura nesta haste
       ctx.save();
       ctx.strokeStyle = stateColor(n);
       ctx.beginPath();
@@ -1109,13 +1135,13 @@ export class GameEngine {
       ctx.restore();
     }
 
-    // ── Draw beam parallelogram helper ───────────────────────────
-    // Draws a filled sloped bar from stemX xa to stemX xb.
-    // yOffset shifts the bar perpendicular to the beam axis (for second beam).
+    // ── Helper: desenhar paralelogramo da ligadura ──────────────────
+    // Desenha uma barra inclinada preenchida do stemX xa ao stemX xb.
+    // yOffset desloca a barra perpendicularmente ao eixo (para segunda barra).
     const fillBeam = (xa, xb, yOffset) => {
       const ya = anchorY(xa) + yOffset;
       const yb = anchorY(xb) + yOffset;
-      const h  = beamUp ? BEAM_H : -BEAM_H; // thickness toward noteheads
+      const h = beamUp ? BEAM_H : -BEAM_H; // thickness toward noteheads
       ctx.beginPath();
       ctx.moveTo(xa, ya);
       ctx.lineTo(xb, yb);
@@ -1127,28 +1153,31 @@ export class GameEngine {
 
     ctx.fillStyle = beamClr;
 
-    // Primary beam spanning the full group
+    // Ligadura primária do primeiro ao último stem do grupo
     fillBeam(x0, xN, 0);
 
-    // Secondary beam for sixteenth-note pairs (parallel, offset by one beam thickness + gap)
+    // Ligadura secundária para pares de semicolcheias (paralela, deslocada por BEAM_H + BEAM_G)
     const off2 = beamUp ? -(BEAM_H + BEAM_G) : BEAM_H + BEAM_G;
     for (let i = 0; i < nd.length - 1; i++) {
-      if (nd[i].note.durationBeats <= 0.26 && nd[i + 1].note.durationBeats <= 0.26) {
+      if (
+        nd[i].note.durationBeats <= 0.26 &&
+        nd[i + 1].note.durationBeats <= 0.26
+      ) {
         fillBeam(stemXof(nd[i]), stemXof(nd[i + 1]), off2);
       }
     }
   }
 
-  // ── Rest symbols ─────────────────────────────────────────────
+  // ── Símbolos de pausa ──────────────────────────────────────────
   _drawRest(ctx, durRaw, x, staffTopY, ls) {
-    // Snap the incoming duration so _drawRest is robust even when called
-    // before snapping has propagated (e.g. during the first render frame).
+    // Arredonda a duração para que _drawRest seja robusto mesmo quando chamado
+    // antes que o snap tenha propagado (ex.: no primeiro frame de renderização).
     const dur = snapToMusical(durRaw);
 
-    // Detect dotted rests (3 = dotted half, 1.5 = dotted quarter, 0.75 = dotted eighth)
+    // Detecta pausas pontuadas (3 = mínima pontuada, 1.5 = semínima pontuada, 0.75 = colcheia pontuada)
     const isDotted =
-      Math.abs(dur - 3.0)  < 0.13 ||
-      Math.abs(dur - 1.5)  < 0.13 ||
+      Math.abs(dur - 3.0) < 0.13 ||
+      Math.abs(dur - 1.5) < 0.13 ||
       Math.abs(dur - 0.75) < 0.13;
     const baseDur = isDotted ? dur / 1.5 : dur;
 
@@ -1157,10 +1186,15 @@ export class GameEngine {
     ctx.strokeStyle = "#555";
 
     if (baseDur >= 4 - 0.13) {
-      // Whole rest: filled rectangle hanging below line D5 (index 1 from top)
-      ctx.fillRect(x - ls * 0.55, staffTopY + ls - ls * 0.42, ls * 1.1, ls * 0.42);
+      // Pausa de semibreve: retângulo preenchido abaixo da linha D5 (índice 1 do topo)
+      ctx.fillRect(
+        x - ls * 0.55,
+        staffTopY + ls - ls * 0.42,
+        ls * 1.1,
+        ls * 0.42,
+      );
     } else if (baseDur >= 2 - 0.13) {
-      // Half rest: filled rectangle sitting on line B4 (index 2 from top)
+      // Pausa de mínima: retângulo preenchido sobre a linha B4 (índice 2 do topo)
       ctx.fillRect(x - ls * 0.55, staffTopY + ls * 2, ls * 1.1, ls * 0.42);
     } else if (baseDur >= 1 - 0.13) {
       this._drawQuarterRest(ctx, x, staffTopY + ls * 2, ls);
@@ -1172,7 +1206,7 @@ export class GameEngine {
       this._drawEighthRest(ctx, x + ls * 0.3, staffTopY + ls * 2.5, ls);
     }
 
-    // Augmentation dot for dotted rests — placed in the third space from bottom
+    // Ponto de aumento para pausas pontuadas — colocado no terceiro espaço de baixo
     if (isDotted) {
       ctx.fillStyle = "#555";
       ctx.beginPath();
@@ -1225,7 +1259,7 @@ export class GameEngine {
     ctx.restore();
   }
 
-  // ── Cursor ────────────────────────────────────────────────────
+  // ── Cursor de posição atual ────────────────────────────────────
   _drawCursor(ctx, cursorX, rowTop, staffH, ls) {
     const grad = ctx.createLinearGradient(
       0,
@@ -1243,7 +1277,7 @@ export class GameEngine {
     ctx.fillRect(cursorX - 1.5, rowTop - ls * 2, 3, staffH + ls * 4);
   }
 
-  // ── Ledger lines ─────────────────────────────────────────────
+  // ── Linhas suplementares ───────────────────────────────────────
   _drawLedgerLines(ctx, step, x, staffTopY, ls, halfW, color) {
     ctx.save();
     ctx.strokeStyle = color;
@@ -1263,7 +1297,7 @@ export class GameEngine {
     ctx.restore();
   }
 
-  // ── Metronome indicator ──────────────────────────────────────
+  // ── Indicador de metrônomo ─────────────────────────────────────
   _drawMetronomeIndicator(ctx, W, H) {
     const cx = W - 48;
     const cy = H - 48;

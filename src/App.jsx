@@ -8,7 +8,7 @@ import ResultsScreen from './screens/ResultsScreen.jsx'
 export default function App() {
   const [screen, setScreen] = useState('menu')
 
-  // Global game state
+  // Estado global do jogo
   const [selectedSong, setSelectedSong] = useState(null)
   const [results, setResults]           = useState(null)
 
@@ -16,7 +16,7 @@ export default function App() {
   const difficulty = 'easy'
   const speedMult  = 1.0
 
-  // Audio buffers shared across screens (songId → AudioBuffer)
+  // Buffers de áudio compartilhados entre telas (songId → AudioBuffer)
   const audioBuffersRef = useRef(new Map())
 
   const navigate = useCallback((nextScreen, data) => {

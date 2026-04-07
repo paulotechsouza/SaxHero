@@ -1,9 +1,13 @@
 /**
- * SongImporter — Analyzes audio files and extracts melody notes.
- * Uses essentia.js PitchMelodia when available, falls back to ACF2+.
+ * SongImporter — Analisa arquivos de áudio e extrai as notas da melodia.
+ *
+ * Usa o algoritmo PitchMelodia do essentia.js quando disponível;
+ * caso contrário cai para o ACF2+ implementado localmente.
+ * O pipeline é: decodificação → filtro passa-banda → extração de pitch
+ * → suavização por mediana → segmentação → quantização no grid do BPM.
  */
 
-// MIDI range for saxophone (all types)
+// Faixa MIDI do saxofone (todos os tipos)
 const SAX_MIDI_MIN = 52;  // E3 = 164 Hz
 const SAX_MIDI_MAX = 84;  // C6 = 1047 Hz
 const SAX_MIDI_MIN_HZ = 164;  // E3
@@ -15,7 +19,7 @@ async function getEssentia() {
   if (essentiaInstance) return essentiaInstance;
   try {
     const { default: EssentiaModule } = await import('essentia.js');
-    // essentia.js may expose EssentiaWASM differently depending on version
+    // essentia.js pode expor EssentiaWASM de formas diferentes conforme a versão
     let wasmFactory;
     try {
       const wasmMod = await import('essentia.js/dist/essentia-wasm.umd.js');
@@ -27,20 +31,20 @@ async function getEssentia() {
     essentiaInstance = new EssentiaModule(wasm);
     return essentiaInstance;
   } catch (e) {
-    console.warn('[SongImporter] essentia.js unavailable, using ACF2+ fallback:', e);
+    console.warn('[SongImporter] essentia.js indisponível, usando fallback ACF2+:', e);
     return null;
   }
 }
 
 export class SongImporter {
   constructor() {
-    this.onProgress      = null; // callback(pct, msg)
-    this.onComplete      = null; // callback(songObject)
-    this.onError         = null; // callback(errMsg)
+    this.onProgress      = null; // callback(porcentagem, mensagem)
+    this.onComplete      = null; // callback(objetoMusica)
+    this.onError         = null; // callback(mensagemErro)
     this.lastAudioBuffer = null;
   }
 
-  // ── Entry point ───────────────────────────────────────────────
+  // ── Ponto de entrada ────────────────────────────────────────────
   async analyzeFile(file, title, bpm) {
     this.lastAudioBuffer = null;
     try {
@@ -53,13 +57,13 @@ export class SongImporter {
       this.lastAudioBuffer = rawBuf;
       this._report(8, `Áudio: ${rawBuf.duration.toFixed(1)}s · ${rawBuf.sampleRate} Hz`);
 
-      // 1. Bandpass filter (removes drums, bass, noise)
+      // 1. Filtro passa-banda (remove bateria, baixo e ruído)
       this._report(12, 'Aplicando filtro de frequências…');
       const filtered = await this._bandpass(rawBuf);
       const samples  = this._toMono(filtered);
       const sr       = filtered.sampleRate;
 
-      // 2. Try essentia.js first, then ACF2+
+      // 2. Tenta essentia.js primeiro, depois ACF2+
       let frames = null;
       frames = await this._extractWithEssentia(samples, sr, (pct, msg) => this._report(pct, msg));
       if (!frames) {
@@ -67,11 +71,11 @@ export class SongImporter {
         frames = await this._extractWithACF2(samples, sr);
       }
 
-      // 3. Median filter to smooth vibrato
+      // 3. Filtro de mediana para suavizar vibrato
       this._report(72, 'Suavizando pitch…');
       this._medianSmooth(frames, 7);
 
-      // 4. Segment into notes
+      // 4. Segmentação em notas
       this._report(78, 'Extraindo notas…');
       const rawNotes = this._segmentNotes(frames);
 
@@ -80,7 +84,7 @@ export class SongImporter {
         return;
       }
 
-      // 5. BPM
+      // 5. Detecção/validação de BPM
       let finalBpm = (bpm && bpm > 0) ? bpm : null;
       if (!finalBpm) {
         this._report(84, 'Detectando BPM…');
@@ -88,7 +92,7 @@ export class SongImporter {
       }
       this._report(88, `BPM: ${finalBpm}`);
 
-      // 6. Quantize
+      // 6. Quantização no grid do BPM
       this._report(92, 'Ajustando ao grid…');
       const notes = this._quantize(rawNotes, finalBpm);
 
@@ -105,12 +109,12 @@ export class SongImporter {
       });
 
     } catch (err) {
-      console.error('[SongImporter]', err);
+      console.error('[SongImporter] Erro na análise:', err);
       this.onError?.('Erro ao analisar: ' + err.message);
     }
   }
 
-  // ── Essentia.js extraction ────────────────────────────────────
+  // ── Extração via Essentia.js ────────────────────────────────────
   async _extractWithEssentia(monoSamples, sr, onProgress) {
     const essentia = await getEssentia();
     if (!essentia) return null;
@@ -156,12 +160,12 @@ export class SongImporter {
       onProgress(70, `${frames.filter(f => f.midi >= 0).length} frames com pitch detectado`);
       return frames;
     } catch (e) {
-      console.warn('[SongImporter] PitchMelodia error:', e);
+      console.warn('[SongImporter] Erro no PitchMelodia:', e);
       return null;
     }
   }
 
-  // ── ACF2+ fallback extraction ─────────────────────────────────
+  // ── Extração via ACF2+ (fallback) ──────────────────────────────
   async _extractWithACF2(samples, sr) {
     const FRAME = 2048;
     const HOP   = 256;
@@ -189,13 +193,13 @@ export class SongImporter {
     return frames;
   }
 
-  // ── Bandpass filter via OfflineAudioContext ──────────────────
+  // ── Filtro passa-banda via OfflineAudioContext ─────────────────
   async _bandpass(audioBuf) {
     const off = new OfflineAudioContext(1, audioBuf.length, audioBuf.sampleRate);
     const src = off.createBufferSource();
     src.buffer = audioBuf;
 
-    // Cascade of 2 HPFs at 175 Hz → 4th-order rolloff (~24 dB/octave)
+    // Cascata de 2 HPFs em 175 Hz → rolloff de 4ª ordem (~24 dB/oitava)
     const hpf1 = off.createBiquadFilter();
     hpf1.type = 'highpass';
     hpf1.frequency.value = 175;
@@ -219,7 +223,7 @@ export class SongImporter {
     return off.startRendering();
   }
 
-  // ── Mix to mono ───────────────────────────────────────────────
+  // ── Mixagem para mono ──────────────────────────────────────────
   _toMono(audioBuf) {
     if (audioBuf.numberOfChannels === 1) return audioBuf.getChannelData(0);
     const L = audioBuf.getChannelData(0);
@@ -229,7 +233,7 @@ export class SongImporter {
     return m;
   }
 
-  // ── Median filter on MIDI track ───────────────────────────────
+  // ── Filtro de mediana na trilha MIDI ───────────────────────────
   _medianSmooth(frames, win) {
     const half = Math.floor(win / 2);
     const orig  = frames.map(f => f.midi);
@@ -243,7 +247,7 @@ export class SongImporter {
     }
   }
 
-  // ── Note segmentation with hysteresis ─────────────────────────
+  // ── Segmentação de notas com histerese ─────────────────────────
   _segmentNotes(frames) {
     const MIN_FRAMES = 5;
     const PITCH_TOL  = 1.3;
@@ -297,7 +301,7 @@ export class SongImporter {
     return notes;
   }
 
-  // ── Quantize to BPM grid ──────────────────────────────────────
+  // ── Quantização no grid do BPM ─────────────────────────────────
   _quantize(notes, bpm) {
     if (!notes.length) return notes;
     const beat   = 60 / bpm;
@@ -314,7 +318,7 @@ export class SongImporter {
     return result;
   }
 
-  // ── BPM detection via IOI ─────────────────────────────────────
+  // ── Detecção de BPM via IOI (Inter-Onset Interval) ─────────────
   _detectBpm(notes) {
     if (notes.length < 4) return null;
     const iois = [];
@@ -348,7 +352,7 @@ export class SongImporter {
     return Math.max(40, Math.min(220, bpmRaw));
   }
 
-  // ── Utilities ─────────────────────────────────────────────────
+  // ── Utilitários ────────────────────────────────────────────────
   _mode(arr) {
     const c = {};
     for (const v of arr) c[v] = (c[v] ?? 0) + 1;
@@ -365,7 +369,7 @@ export class SongImporter {
   }
 }
 
-// ── ACF2+ with confidence return ─────────────────────────────────
+// ── ACF2+ com retorno de confiança ──────────────────────────────
 function autoCorrelateConfident(buf, sampleRate) {
   const SIZE = buf.length;
 

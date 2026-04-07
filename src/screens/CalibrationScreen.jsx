@@ -16,7 +16,7 @@ export default function CalibrationScreen({
 
   const detectorRef = useRef(null)
 
-  // Transposition helper (written note from concert note)
+  // Helper de transposição (nota escrita a partir da nota de concerto)
   const SAX_TRANSPOSITIONS = { alto: 9, tenor: 2, soprano: 2 }
   const _NOTES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
   const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']

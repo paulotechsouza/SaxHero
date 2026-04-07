@@ -23,9 +23,9 @@ export default function MenuScreen({
         const audioBuf = await tmpCtx.decodeAudioData(arrayBuf)
         await tmpCtx.close()
         audioBuffers.set(song.id, audioBuf)
-        console.log('[MenuScreen] Audio preloaded:', song.audioSrc)
+        console.log('[MenuScreen] Áudio pré-carregado:', song.audioSrc)
       } catch (e) {
-        console.warn('[MenuScreen] Could not preload audio:', e)
+        console.warn('[MenuScreen] Não foi possível pré-carregar áudio:', e)
       }
     }
   }

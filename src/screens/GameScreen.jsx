@@ -28,10 +28,10 @@ export default function GameScreen({
   const [metronomeOn, setMetronomeOn] = useState(true)
   const [bgVolume, setBgVolume]     = useState(0.35)
 
-  // feedback pop animation trigger
+  // gatilho de animação do feedback (pop)
   const feedbackKeyRef = useRef(0)
 
-  // ── Initialize engine ──────────────────────────────────────────
+  // ── Inicializa o motor de jogo ─────────────────────────────────
   useEffect(() => {
     if (!selectedSong || !canvasRef.current) return
 
@@ -60,10 +60,10 @@ export default function GameScreen({
 
     engineRef.current = engine
 
-    // Transfer pre-loaded audio buffers
+    // Repassa buffers de áudio pré-carregados para o motor
     audioBuffers.forEach((buf, id) => engine.storeAudioBuffer(id, buf))
 
-    // Load audioSrc if not yet loaded
+    // Carrega audioSrc se ainda não estiver em cache
     if (selectedSong.audioSrc && !audioBuffers.has(selectedSong.id)) {
       engine.preloadAudioSrc(selectedSong).then(() => {
         audioBuffers.set(selectedSong.id, engine.audioBuffers.get(selectedSong.id))
@@ -74,12 +74,12 @@ export default function GameScreen({
     engine.setMetronomeEnabled(metronomeOn)
     engine.setBgVolume(bgVolume)
 
-    // Start detector
+    // Inicia o detector de pitch
     detector.init().then((ok) => {
       if (ok) detector.start()
     })
 
-    // Countdown
+    // Inicia contagem regressiva
     startCountdown(engine)
 
     return () => {

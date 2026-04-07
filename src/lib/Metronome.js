@@ -1,6 +1,9 @@
 /**
- * Metronome — Web Audio API based metronome
- * Extracted from game.js
+ * Metronome — Metrônomo baseado em Web Audio API
+ *
+ * Agenda cliques usando setTimeout de lookahead curto (25 ms) para
+ * manter o timing preciso mesmo com oscilações do event loop JavaScript.
+ * Aciona onBeat(isAccent) de forma sincronizada com o áudio agendado.
  */
 
 export default class Metronome {
@@ -11,7 +14,7 @@ export default class Metronome {
     this._next    = 0;
     this._count   = 0;
     this._timer   = null;
-    /** Called on each beat: onBeat(isAccent) */
+    /** Chamado em cada tempo: onBeat(ehAcento) */
     this.onBeat   = null;
   }
 
@@ -52,7 +55,7 @@ export default class Metronome {
     gain.gain.exponentialRampToValueAtTime(0.001, time + 0.055);
     osc.start(time);
     osc.stop(time + 0.09);
-    // Visual callback synchronized with audio
+    // Callback visual sincronizado com o áudio agendado
     const delay = Math.max(0, (time - this.audioCtx.currentTime) * 1000);
     setTimeout(() => this.onBeat?.(accent), delay);
   }
