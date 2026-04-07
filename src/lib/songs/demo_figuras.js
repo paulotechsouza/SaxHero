@@ -62,5 +62,6 @@ export const demoFiguras = {
   author: "SaxHero",
   difficulty: 1,
   bpm: BPM,
+  timeSignature: { numerator: 4, denominator: 4 },
   notes: beats(_buildNotes(), BPM),
 };

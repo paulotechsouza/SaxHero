@@ -135,6 +135,7 @@ export const aEleAGloria = {
   author: "Hinário",
   difficulty: 3,
   bpm: BPM,
+  timeSignature: { numerator: 4, denominator: 4 },
   audioSrc: "/A ele a gloria.mp3",
   notes: beats(
     [

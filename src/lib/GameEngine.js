@@ -214,7 +214,18 @@ export class GameEngine {
 
   // ── Construção do layout da partitura ───────────────────────
   _buildScore() {
-    const BEATS_PER_MEASURE = 4;
+    // Fórmula de compasso: lida do campo timeSignature da música.
+    // Padrão: 4/4. Para 6/8 ou 12/8 (métricas compostas), o denominador = 8
+    // e o agrupamento de ligaduras se faz em grupos de 3 colcheias.
+    const { numerator = 4, denominator = 4 } = this.song.timeSignature ?? {};
+    // beatsPerMeasure em unidades internas (semínima = 1 tempo).
+    // Exemplos: 4/4 → 4, 3/4 → 3, 6/8 → 3, 12/8 → 6
+    const BEATS_PER_MEASURE = numerator * (4 / denominator);
+    // beatGroupBeats: tamanho do grupo de ligaduras (beam group) em semínimas.
+    // Métricas simples (♩ = 1 tempo): grupo de 2 semínimas (padrão 4/4 e 3/4).
+    // Métricas compostas (♪ = 1 tempo, ternário): grupo de 3 colcheias = 1,5 ♩.
+    const isCompound = denominator === 8 || denominator === 16;
+    const beatGroupBeats = isCompound ? 3 * (4 / denominator) : 2;
     const bpm = this.song.bpm;
     const spb = 60 / bpm;
     const firstNoteTime = this.notes.length ? this.notes[0].time : 0;
@@ -248,11 +259,12 @@ export class GameEngine {
     const numMeasures = Math.max(1, Math.ceil(totalBeats / BEATS_PER_MEASURE));
 
     this._rests = this._computeRests(numMeasures, BEATS_PER_MEASURE);
-    this._buildBeamGroups();
+    this._buildBeamGroups(beatGroupBeats);
 
     this._scoreData = {
       numMeasures,
       beatsPerMeasure: BEATS_PER_MEASURE,
+      timeSignature: { numerator, denominator },
       firstNoteTime,
     };
   }
@@ -287,7 +299,7 @@ export class GameEngine {
     return rests;
   }
 
-  _buildBeamGroups() {
+  _buildBeamGroups(beatGroupBeats = 2) {
     for (const note of this.notes) note.beamGroupId = -1;
 
     const sorted = [...this.notes].sort((a, b) => a.beatStart - b.beatStart);
@@ -314,15 +326,19 @@ export class GameEngine {
           const prev = cur[cur.length - 1];
           const gap = note.beatStart - (prev.beatStart + prev.durationBeats);
           // Tolerância de 0,03 tempos absorve arredondamentos após o snap.
-          // Também aplica a regra de 4/4: ligaduras não cruzam a fronteira
-          // tempo-2 → tempo-3 (beatInMeasure 1,5 → 2,0).
-          const prevHalf = Math.floor(prev.beatInMeasure / 2);
-          const noteHalf = Math.floor(note.beatInMeasure / 2);
-          const sameHalf = prevHalf === noteHalf;
+          // Liga notas dentro do mesmo grupo de beats (ex.: 2 semínimas em
+          // métricas simples; 3 colcheias em métricas compostas como 6/8).
+          const prevGroup = Math.floor(
+            prev.beatInMeasure / beatGroupBeats + 0.01,
+          );
+          const noteGroup = Math.floor(
+            note.beatInMeasure / beatGroupBeats + 0.01,
+          );
+          const sameGroup = prevGroup === noteGroup;
           if (
             gap < 0.03 &&
             note.measureIndex === prev.measureIndex &&
-            sameHalf
+            sameGroup
           ) {
             cur.push(note);
           } else {
@@ -724,7 +740,7 @@ export class GameEngine {
   // ── Renderiza uma linha da partitura ──────────────────────────────
   _drawRow(ctx, L, row, rowTop, currentBeat, activeRow) {
     const { W, ls, clefW, measPerRow, measureW, staffH } = L;
-    const { numMeasures, beatsPerMeasure } = this._scoreData;
+    const { numMeasures, beatsPerMeasure, timeSignature } = this._scoreData;
 
     const firstMeasure = row * measPerRow;
     const lastMeasure = Math.min(
@@ -763,14 +779,14 @@ export class GameEngine {
     ctx.textAlign = "left";
     ctx.fillText("\uD834\uDD1E", 2, bot + ls * 0.65);
 
-    // Fórmula de compasso 4/4
+    // Fórmula de compasso — lida dinamicamente do scoreData
     const tsX = ls * 5.9;
     ctx.fillStyle = "#222";
     ctx.font = `bold ${ls * 1.9}px 'Times New Roman', Georgia, serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("4", tsX, rowTop + ls * 1.0);
-    ctx.fillText("4", tsX, rowTop + ls * 3.0);
+    ctx.fillText(String(timeSignature.numerator), tsX, rowTop + ls * 1.0);
+    ctx.fillText(String(timeSignature.denominator), tsX, rowTop + ls * 3.0);
 
     // Barras de compasso e números
     for (let m = firstMeasure; m <= lastMeasure; m++) {

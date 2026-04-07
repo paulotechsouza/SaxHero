@@ -3,17 +3,15 @@
  * Cada música vive em seu próprio arquivo em songs/.
  * Para adicionar uma nova música: crie songs/<id>.js e importe aqui.
  */
-import { demoFiguras }  from './songs/demo_figuras.js';
-import { aEleAGloria }  from './songs/a_ele_a_gloria.js';
+import { demoFiguras } from "./songs/demo_figuras.js";
+import { demo34 } from "./songs/demo_tres_quartos.js";
+import { aEleAGloria } from "./songs/a_ele_a_gloria.js";
 
 // Re-exporta beats() para que código legado continue funcionando
-export { beats } from './songs/utils.js';
+export { beats } from "./songs/utils.js";
 
 // ── Catálogo estático ────────────────────────────────────────────────────────
-const SONGS = [
-  demoFiguras,
-  aEleAGloria,
-];
+const SONGS = [demoFiguras, demo34, aEleAGloria];
 
 // ── Músicas importadas (persistidas em localStorage) ─────────────────────────
 function getAllSongs() {
@@ -22,7 +20,7 @@ function getAllSongs() {
 
 function loadImportedSongs() {
   try {
-    return JSON.parse(localStorage.getItem('saxhero_songs') ?? '[]');
+    return JSON.parse(localStorage.getItem("saxhero_songs") ?? "[]");
   } catch {
     return [];
   }
@@ -31,12 +29,12 @@ function loadImportedSongs() {
 function saveImportedSong(song) {
   const list = loadImportedSongs();
   list.push(song);
-  localStorage.setItem('saxhero_songs', JSON.stringify(list));
+  localStorage.setItem("saxhero_songs", JSON.stringify(list));
 }
 
 function deleteImportedSong(id) {
   const list = loadImportedSongs().filter((s) => s.id !== id);
-  localStorage.setItem('saxhero_songs', JSON.stringify(list));
+  localStorage.setItem("saxhero_songs", JSON.stringify(list));
 }
 
 export {
